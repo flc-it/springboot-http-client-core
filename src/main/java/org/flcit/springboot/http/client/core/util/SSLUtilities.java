@@ -25,11 +25,13 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 
-import org.apache.http.client.HttpClient;
-import org.apache.http.conn.ssl.NoopHostnameVerifier;
-import org.apache.http.conn.ssl.TrustAllStrategy;
-import org.apache.http.impl.client.HttpClientBuilder;
-import org.apache.http.impl.client.HttpClients;
+import org.apache.hc.client5.http.classic.HttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy;
+import org.apache.hc.client5.http.ssl.NoopHostnameVerifier;
+import org.apache.hc.client5.http.ssl.TrustAllStrategy;
 
 /**
  * 
@@ -47,6 +49,7 @@ public final class SSLUtilities {
     /**
      * @return
      */
+    @Deprecated
     public static HttpClient getHttpClient() {
         return getHttpClientBuilder().build();
     }
@@ -54,6 +57,7 @@ public final class SSLUtilities {
     /**
      * @return
      */
+    @Deprecated
     public static HttpClientBuilder getHttpClientBuilder() {
         return disableSSLSecurity(HttpClients.custom());
     }
@@ -62,10 +66,23 @@ public final class SSLUtilities {
      * @param httpClientBuilder
      * @return
      */
+    @Deprecated
     public static HttpClientBuilder disableSSLSecurity(HttpClientBuilder httpClientBuilder) {
-        return httpClientBuilder
-                .setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE)
-                .setSSLContext(_SSLContext);
+        httpClientBuilder.setConnectionManager(
+        disableSSLSecurity(PoolingHttpClientConnectionManagerBuilder.create()).build());
+        return httpClientBuilder;
+    }
+
+    /**
+     * @param poolingHttpClientConnectionManagerBuilder
+     * @return
+     */
+    public static PoolingHttpClientConnectionManagerBuilder disableSSLSecurity(PoolingHttpClientConnectionManagerBuilder poolingHttpClientConnectionManagerBuilder) {
+        poolingHttpClientConnectionManagerBuilder
+        .setTlsSocketStrategy(
+                new DefaultClientTlsStrategy(_SSLContext, NoopHostnameVerifier.INSTANCE)
+        );
+        return poolingHttpClientConnectionManagerBuilder;
     }
 
     /**

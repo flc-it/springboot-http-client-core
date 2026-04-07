@@ -98,8 +98,8 @@ public final class QueryParamsUtils {
         if (value == null) {
             return null;
         }
-        if (value instanceof Date) {
-            return transform((Date) value);
+        if (value instanceof Date date) {
+            return transform(date);
         }
         if (value instanceof Optional) {
             return transform(((Optional<?>) value).orElse(null));

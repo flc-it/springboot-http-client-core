@@ -20,12 +20,19 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
-import org.apache.http.HttpRequestInterceptor;
-import org.apache.http.client.config.RequestConfig;
-import org.apache.http.impl.client.HttpClients;
+import org.apache.hc.client5.http.config.ConnectionConfig;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.io.ManagedHttpClientConnectionFactory;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.core5.http.HttpRequestInterceptor;
+import org.apache.hc.core5.http.config.Http1Config;
 import org.flcit.commons.core.util.BooleanUtils;
+import org.flcit.commons.core.util.FunctionUtils;
 import org.flcit.commons.core.util.ObjectUtils;
+import org.flcit.springboot.http.client.core.configuration.HttpClientBuilderConfiguration.PoolConnectionManagerConfiguration.ConnectionConfiguration;
 import org.flcit.springboot.http.client.core.interceptor.logging.BaseLoggingClientInterceptor;
 import org.flcit.springboot.http.client.core.interceptor.logging.LoggingClientHttpRequestInterceptor;
 import org.flcit.springboot.http.client.core.interceptor.logging.LoggingClientInterceptor;
@@ -51,16 +58,20 @@ public class HttpClientBuilder extends HttpClientBuilderConfiguration {
      */
     public HttpClientBuilder(ProxyConfiguration proxyConfiguration) {
         this.proxyConfiguration = proxyConfiguration;
-        setMaxConnectionPerRoute(15);
-        setMaxConnectionTotal(60);
+        super.setRequest(
+                new RequestConfiguration()
+                .setRedirects(Boolean.FALSE)
+                .setContentCompression(Boolean.TRUE)
+        )
+        .setPoolConnectionManager(
+                new PoolConnectionManagerConfiguration()
+                .setMaxConnectionPerRoute(20)
+                .setMaxConnectionTotal(50)
+        );
     }
 
     private final boolean isTraces(final HttpClientBuilderConfiguration builderConfiguration) {
         return builderConfiguration.isTracesActive();
-    }
-
-    private final boolean isStreaming(final HttpClientBuilderConfiguration builderConfiguration) {
-        return BooleanUtils.isTrueOrNullAndTrue(builderConfiguration.getStreaming(), this.getStreaming());
     }
 
     private final boolean isProxy(final HttpClientBuilderConfiguration builderConfiguration) {
@@ -148,52 +159,131 @@ public class HttpClientBuilder extends HttpClientBuilderConfiguration {
                 && proxyConfiguration != null) {
             factory.setProxy(proxyConfiguration.build());
         }
-        if (isStreaming(builderConfiguration) && !isTracesActive()) {
-            factory.setBufferRequestBody(false);
-            if (ObjectUtils.hasOrDefault(builderConfiguration.getChunkSize(), this.getChunkSize())) {
-                factory.setChunkSize(ObjectUtils.getOrDefault(builderConfiguration.getChunkSize(), this.getChunkSize()));
-            }
+        if (ObjectUtils.hasOrDefault(builderConfiguration.getChunkSize(), this.getChunkSize())) {
+            factory.setChunkSize(ObjectUtils.getOrDefault(builderConfiguration.getChunkSize(), this.getChunkSize()));
         }
         return factory;
     }
 
     private final ClientHttpRequestFactory buildApache(final HttpClientBuilderConfiguration builderConfiguration, final HttpRequestInterceptor firstHttpRequestInterceptor) {
-        final HttpComponentsClientHttpRequestFactory factory = new HttpComponentsClientHttpRequestFactory(create(builderConfiguration, firstHttpRequestInterceptor).build());
-        if (isStreaming(builderConfiguration) && !isTracesActive()) {
-            factory.setBufferRequestBody(false);
-        }
-        return factory;
+        return new HttpComponentsClientHttpRequestFactory(create(builderConfiguration, firstHttpRequestInterceptor).build());
     }
 
-    private final org.apache.http.impl.client.HttpClientBuilder create(final HttpClientBuilderConfiguration builderConfiguration, final HttpRequestInterceptor firstHttpRequestInterceptor) {
-        final RequestConfig.Builder requestConfigBuilder = RequestConfig.custom();
-        if (ObjectUtils.hasOrDefault(builderConfiguration.getConnectTimeout(), this.getConnectTimeout())) {
-            requestConfigBuilder.setConnectTimeout(ObjectUtils.getOrDefault(builderConfiguration.getConnectTimeout(), this.getConnectTimeout()));
-        }
-        if (ObjectUtils.hasOrDefault(builderConfiguration.getConnectionRequestTimeout(), this.getConnectionRequestTimeout())) {
-            requestConfigBuilder.setConnectionRequestTimeout(ObjectUtils.getOrDefault(builderConfiguration.getConnectionRequestTimeout(), this.getConnectionRequestTimeout()));
-        }
-        if (ObjectUtils.hasOrDefault(builderConfiguration.getSocketTimeout(), this.getSocketTimeout())) {
-            requestConfigBuilder.setSocketTimeout(ObjectUtils.getOrDefault(builderConfiguration.getSocketTimeout(), this.getSocketTimeout()));
-        }
-        org.apache.http.impl.client.HttpClientBuilder httpClientBuilder = HttpClients.custom().setDefaultRequestConfig(requestConfigBuilder.build());
-        if (isProxy(builderConfiguration)
-                && proxyConfiguration != null) {
+    private final org.apache.hc.client5.http.impl.classic.HttpClientBuilder create(final HttpClientBuilderConfiguration builderConfiguration, final HttpRequestInterceptor firstHttpRequestInterceptor) {
+        final RequestConfig.Builder requestConfigBuilder = requestConfig(builderConfiguration.getRequest());
+        final PoolingHttpClientConnectionManagerBuilder connectionManagerBuilder = connectionManagerConfig(builderConfiguration);
+        final org.apache.hc.client5.http.impl.classic.HttpClientBuilder httpClientBuilder = HttpClients.custom();
+
+        if (isProxy(builderConfiguration) && proxyConfiguration != null) {
             proxyConfiguration.add(httpClientBuilder, requestConfigBuilder);
         }
         if (Boolean.FALSE.equals(builderConfiguration.getSslCertificateVerification())) {
-            SSLUtilities.disableSSLSecurity(httpClientBuilder);
+            SSLUtilities.disableSSLSecurity(connectionManagerBuilder);
         }
+        httpClientBuilder.setDefaultRequestConfig(requestConfigBuilder.build());
+        httpClientBuilder.setConnectionManager(connectionManagerBuilder.build());
         if (firstHttpRequestInterceptor != null) {
-            httpClientBuilder.addInterceptorFirst(firstHttpRequestInterceptor);
-        }
-        if (ObjectUtils.hasOrDefault(builderConfiguration.getMaxConnectionPerRoute(), this.getMaxConnectionPerRoute())) {
-            httpClientBuilder.setMaxConnPerRoute(ObjectUtils.getOrDefault(builderConfiguration.getMaxConnectionPerRoute(), this.getMaxConnectionPerRoute()));
-        }
-        if (ObjectUtils.hasOrDefault(builderConfiguration.getMaxConnectionTotal(), this.getMaxConnectionTotal())) {
-            httpClientBuilder.setMaxConnTotal(ObjectUtils.getOrDefault(builderConfiguration.getMaxConnectionTotal(), this.getMaxConnectionTotal()));
+            httpClientBuilder.addRequestInterceptorFirst(firstHttpRequestInterceptor);
         }
         return httpClientBuilder;
     }
+
+    private final RequestConfig.Builder requestConfig(final RequestConfiguration requestConfiguration) {
+        final RequestConfig.Builder requestConfigBuilder = RequestConfig.custom();
+        final RequestConfiguration defaultRequestConfiguration = this.getRequest();
+        FunctionUtils.consumeFirstNotNull(
+                requestConfigBuilder::setRedirectsEnabled,
+                requestConfiguration != null ? requestConfiguration.getRedirects() : null,
+                defaultRequestConfiguration != null ? defaultRequestConfiguration.getRedirects() : null
+        );
+        FunctionUtils.consumeFirstNotNull(
+                requestConfigBuilder::setMaxRedirects,
+                requestConfiguration != null ? requestConfiguration.getMaxRedirects() : null,
+                defaultRequestConfiguration != null ? defaultRequestConfiguration.getMaxRedirects() : null
+        );
+        FunctionUtils.consumeFirstNotNull(
+                requestConfigBuilder::setContentCompressionEnabled,
+                requestConfiguration != null ? requestConfiguration.getContentCompression() : null,
+                defaultRequestConfiguration != null ? defaultRequestConfiguration.getContentCompression() : null
+        );
+        FunctionUtils.consumeFirstNotNull(
+                v -> requestConfigBuilder.setDefaultKeepAlive(v, TimeUnit.MILLISECONDS),
+                requestConfiguration != null ? requestConfiguration.getDefaultKeepAlive() : null,
+                defaultRequestConfiguration != null ? defaultRequestConfiguration.getDefaultKeepAlive() : null
+        );
+        FunctionUtils.consumeFirstNotNull(
+                v -> requestConfigBuilder.setConnectionRequestTimeout(v, TimeUnit.MILLISECONDS),
+                requestConfiguration != null ? requestConfiguration.getConnectionRequestTimeout() : null,
+                defaultRequestConfiguration != null ? defaultRequestConfiguration.getConnectionRequestTimeout() : null
+        );
+        FunctionUtils.consumeFirstNotNull(
+                v -> requestConfigBuilder.setResponseTimeout(v, TimeUnit.MILLISECONDS),
+                requestConfiguration != null ? requestConfiguration.getResponseTimeout() : null,
+                defaultRequestConfiguration != null ? defaultRequestConfiguration.getResponseTimeout() : null
+        );
+        return requestConfigBuilder;
+    }
+
+    private final PoolingHttpClientConnectionManagerBuilder connectionManagerConfig(final HttpClientBuilderConfiguration builderConfiguration) {
+        final PoolingHttpClientConnectionManagerBuilder connectionManagerBuilder = PoolingHttpClientConnectionManagerBuilder.create();
+        final PoolConnectionManagerConfiguration poolConnectionManagerConfiguration = builderConfiguration.getPoolConnectionManager();
+        final PoolConnectionManagerConfiguration defaultPoolConnectionManagerConfiguration = this.getPoolConnectionManager();
+        FunctionUtils.consumeFirstNotNull(
+                connectionManagerBuilder::setConnPoolPolicy,
+                poolConnectionManagerConfiguration != null ? poolConnectionManagerConfiguration.getReusePolicy() : null,
+                defaultPoolConnectionManagerConfiguration != null ? defaultPoolConnectionManagerConfiguration.getReusePolicy() : null
+        );
+        FunctionUtils.consumeFirstNotNull(
+                connectionManagerBuilder::setPoolConcurrencyPolicy,
+                poolConnectionManagerConfiguration != null ? poolConnectionManagerConfiguration.getConcurrencyPolicy() : null,
+                defaultPoolConnectionManagerConfiguration != null ? defaultPoolConnectionManagerConfiguration.getConcurrencyPolicy() : null
+        );
+        FunctionUtils.consumeFirstNotNull(
+                connectionManagerBuilder::setMaxConnPerRoute,
+                poolConnectionManagerConfiguration != null ? poolConnectionManagerConfiguration.getMaxConnectionPerRoute() : null,
+                defaultPoolConnectionManagerConfiguration != null ? defaultPoolConnectionManagerConfiguration.getMaxConnectionPerRoute() : null
+        );
+        FunctionUtils.consumeFirstNotNull(
+                connectionManagerBuilder::setMaxConnTotal,
+                poolConnectionManagerConfiguration != null ? poolConnectionManagerConfiguration.getMaxConnectionTotal() : null,
+                defaultPoolConnectionManagerConfiguration != null ? defaultPoolConnectionManagerConfiguration.getMaxConnectionTotal() : null
+        );
+        if (ObjectUtils.hasOrDefault(builderConfiguration.getChunkSize(), this.getChunkSize())) {
+            connectionManagerBuilder.setConnectionFactory(
+                    ManagedHttpClientConnectionFactory.builder()
+                    .http1Config(
+                            Http1Config.custom().setBufferSize(
+                                    ObjectUtils.getOrDefault(builderConfiguration.getChunkSize(), this.getChunkSize())
+                                    )
+                            .build())
+                    .build()
+            );
+        }
+        connectionManagerBuilder.setDefaultConnectionConfig(connectionConfig(builderConfiguration).build());
+        return connectionManagerBuilder;
+    }
+
+    private final ConnectionConfig.Builder connectionConfig(final HttpClientBuilderConfiguration builderConfiguration) {
+        final ConnectionConfig.Builder connectionConfigBuilder = ConnectionConfig.custom();
+        final ConnectionConfiguration connectionConfiguration = builderConfiguration.getPoolConnectionManager() != null ? builderConfiguration.getPoolConnectionManager().getConnection() : null;
+        final ConnectionConfiguration defaultConnectionConfiguration = this.getPoolConnectionManager() != null ? this.getPoolConnectionManager().getConnection() : null;
+        if (ObjectUtils.hasOrDefault(builderConfiguration.getConnectTimeout(), this.getConnectTimeout())) {
+            connectionConfigBuilder.setConnectTimeout(ObjectUtils.getOrDefault(builderConfiguration.getConnectTimeout(), this.getConnectTimeout()), TimeUnit.MILLISECONDS);
+        }
+        if (ObjectUtils.hasOrDefault(builderConfiguration.getSocketTimeout(), this.getSocketTimeout())) {
+            connectionConfigBuilder.setSocketTimeout(ObjectUtils.getOrDefault(builderConfiguration.getSocketTimeout(), this.getSocketTimeout()), TimeUnit.MILLISECONDS);
+        }
+        FunctionUtils.consumeFirstNotNull(
+                v -> connectionConfigBuilder.setTimeToLive(v, TimeUnit.MILLISECONDS),
+                connectionConfiguration != null ? connectionConfiguration.getTimeToLive() : null,
+                defaultConnectionConfiguration != null ? defaultConnectionConfiguration.getTimeToLive() : null
+        );
+        FunctionUtils.consumeFirstNotNull(
+                v -> connectionConfigBuilder.setValidateAfterInactivity(v, TimeUnit.MILLISECONDS),
+                connectionConfiguration != null ? connectionConfiguration.getValidateAfterInactivity() : null,
+                defaultConnectionConfiguration != null ? defaultConnectionConfiguration.getValidateAfterInactivity() : null
+        );
+        return connectionConfigBuilder;
+    }  
 
 }

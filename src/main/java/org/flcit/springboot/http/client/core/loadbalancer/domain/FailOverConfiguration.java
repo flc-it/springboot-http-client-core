@@ -117,7 +117,7 @@ public class FailOverConfiguration {
      */
     public boolean isFail(RestClientException e) {
         return isStatusCodes(e, 503)
-                || (e.getCause() instanceof IOException && isFailException((IOException) e.getCause()))
+                || (e.getCause() instanceof IOException iOException && isFailException(iOException))
                 || isStatusCodes(e, failStatus);
     }
     /**
@@ -140,10 +140,10 @@ public class FailOverConfiguration {
      */
     public boolean isRetry(RestClientException e) {
         return RestClientResponseException.class.isAssignableFrom(e.getClass())
-                && ArrayUtils.contains(retryStatus, ((RestClientResponseException) e).getRawStatusCode());
+                && ArrayUtils.contains(retryStatus, ((RestClientResponseException) e).getStatusCode().value());
     }
     private static final boolean isStatusCodes(RestClientException e, int... statusCodes) {
         return RestClientResponseException.class.isAssignableFrom(e.getClass())
-                && ArrayUtils.contains(statusCodes, ((RestClientResponseException) e).getRawStatusCode());
+                && ArrayUtils.contains(statusCodes, ((RestClientResponseException) e).getStatusCode().value());
     }
 }

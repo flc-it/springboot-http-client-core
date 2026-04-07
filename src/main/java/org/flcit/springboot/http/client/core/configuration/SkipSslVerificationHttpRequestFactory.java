@@ -34,8 +34,8 @@ final class SkipSslVerificationHttpRequestFactory extends SimpleClientHttpReques
 
     @Override
     protected void prepareConnection(HttpURLConnection connection, String httpMethod) throws IOException {
-        if (connection instanceof HttpsURLConnection) {
-            SSLUtilities.disableSSLSecurity((HttpsURLConnection) connection);
+        if (connection instanceof HttpsURLConnection httpsURLConnection) {
+            SSLUtilities.disableSSLSecurity(httpsURLConnection);
         }
         super.prepareConnection(connection, httpMethod);
     }

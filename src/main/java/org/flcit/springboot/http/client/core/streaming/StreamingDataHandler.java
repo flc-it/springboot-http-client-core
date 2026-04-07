@@ -20,7 +20,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.function.Consumer;
 
-import javax.activation.DataHandler;
+import jakarta.activation.DataHandler;
 
 /**
  * 

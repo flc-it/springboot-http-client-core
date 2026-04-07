@@ -26,7 +26,7 @@ import java.util.function.Supplier;
 import java.util.zip.DeflaterInputStream;
 import java.util.zip.GZIPInputStream;
 
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletResponse;
 
 import org.flcit.commons.core.file.util.FileUtils;
 import org.flcit.commons.core.util.ReflectionUtils;
@@ -87,15 +87,14 @@ public final class ClientHttpUtils {
      * @return
      */
     public static ResponseEntity<Object> buildResponse(RestClientException e) {
-        if (e instanceof RestClientResponseException) {
-            RestClientResponseException ex = (RestClientResponseException) e;
+        if (e instanceof RestClientResponseException restClientResponseException) {
             try {
-                BodyBuilder builder = ResponseEntity.status(ex.getRawStatusCode());
-                MediaType contentType = getContentType(ex);
+                BodyBuilder builder = ResponseEntity.status(restClientResponseException.getStatusCode());
+                MediaType contentType = getContentType(restClientResponseException);
                 if (contentType != null) {
                     builder.contentType(contentType);
                 }
-                return builder.body(inputStream(ex));
+                return builder.body(inputStream(restClientResponseException));
             } catch (IOException e1) { /* DO NOTHING */ }
         }
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
@@ -106,15 +105,14 @@ public final class ClientHttpUtils {
      * @param response
      */
     public static void buildResponse(RestClientException e, HttpServletResponse response) {
-        if (e instanceof RestClientResponseException) {
-            RestClientResponseException ex = (RestClientResponseException) e;
+        if (e instanceof RestClientResponseException restClientResponseException) {
             try {
-                response.setStatus(ex.getRawStatusCode());
-                MediaType contentType = getContentType(ex);
+                response.setStatus(restClientResponseException.getStatusCode().value());
+                MediaType contentType = getContentType(restClientResponseException);
                 if (contentType != null) {
                     response.setContentType(contentType.toString());
                 }
-                StreamUtils.copy(inputStream(ex), response.getOutputStream());
+                StreamUtils.copy(inputStream(restClientResponseException), response.getOutputStream());
             } catch (IOException e1) { /* DO NOTHING */ }
         } else {
             response.setStatus(HttpStatus.INTERNAL_SERVER_ERROR.value());
@@ -128,7 +126,7 @@ public final class ClientHttpUtils {
      * @throws IOException
      */
     public static void buildResponse(ClientHttpResponse clientReponse, HttpServletResponse response, String... headers) throws IOException {
-        response.setStatus(clientReponse.getRawStatusCode());
+        response.setStatus(clientReponse.getStatusCode().value());
         MediaType contentType = clientReponse.getHeaders().getContentType();
         if (contentType != null) {
             response.setContentType(contentType.toString());

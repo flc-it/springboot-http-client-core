@@ -22,17 +22,17 @@ import java.net.PasswordAuthentication;
 import java.net.Proxy;
 import java.util.Collections;
 
-import org.apache.http.HttpHost;
-import org.apache.http.auth.AuthScope;
-import org.apache.http.auth.NTCredentials;
-import org.apache.http.auth.UsernamePasswordCredentials;
-import org.apache.http.client.CredentialsProvider;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.config.AuthSchemes;
-import org.apache.http.client.config.RequestConfig;
-import org.apache.http.impl.client.BasicCredentialsProvider;
-import org.apache.http.impl.client.HttpClientBuilder;
-import org.apache.http.impl.client.HttpClients;
+import org.apache.hc.client5.http.auth.AuthScope;
+import org.apache.hc.client5.http.auth.CredentialsStore;
+import org.apache.hc.client5.http.auth.NTCredentials;
+import org.apache.hc.client5.http.auth.StandardAuthScheme;
+import org.apache.hc.client5.http.auth.UsernamePasswordCredentials;
+import org.apache.hc.client5.http.classic.HttpClient;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.auth.BasicCredentialsProvider;
+import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.http.HttpHost;
 import org.springframework.util.StringUtils;
 
 /**
@@ -146,6 +146,7 @@ public class ProxyConfiguration {
     /**
      * @return
      */
+    @Deprecated
     public HttpClient getHttpClient() {
         return getHttpClientBuilder().build();
     }
@@ -153,6 +154,7 @@ public class ProxyConfiguration {
     /**
      * @return
      */
+    @Deprecated
     public HttpClientBuilder getHttpClientBuilder() {
         return getHttpClientBuilder(RequestConfig.custom());
     }
@@ -161,6 +163,7 @@ public class ProxyConfiguration {
      * @param requestConfigBuilder
      * @return
      */
+    @Deprecated
     public HttpClientBuilder getHttpClientBuilder(RequestConfig.Builder requestConfigBuilder) {
         return add(HttpClients.custom(), requestConfigBuilder);
     }
@@ -178,18 +181,17 @@ public class ProxyConfiguration {
      * @param requestConfigBuilder
      * @return
      */
+    @SuppressWarnings("deprecation")
     public HttpClientBuilder add(HttpClientBuilder httpClientBuilder, RequestConfig.Builder requestConfigBuilder) {
-        CredentialsProvider credsProvider = null;
+        CredentialsStore credsProvider = null;
         if (isWithCredentials()) {
             credsProvider = new BasicCredentialsProvider();
-            credsProvider.setCredentials(new AuthScope(getHost()), new UsernamePasswordCredentials(username, password));
-            credsProvider.setCredentials(new AuthScope(getHost(), AuthScope.ANY_REALM, AuthSchemes.NTLM), new NTCredentials(username, password, null, domain));
+            credsProvider.setCredentials(new AuthScope(getHost()), new UsernamePasswordCredentials(username, password.toCharArray()));
+            credsProvider.setCredentials(new AuthScope(getHost(), null, StandardAuthScheme.NTLM), new NTCredentials(username, password.toCharArray(), null, domain));
         }
+        requestConfigBuilder.setProxyPreferredAuthSchemes(Collections.singletonList(StandardAuthScheme.NTLM));
         return httpClientBuilder
-                .setDefaultRequestConfig(requestConfigBuilder
-                        .setProxy(getHost())
-                        .setProxyPreferredAuthSchemes(Collections.singletonList(AuthSchemes.NTLM))
-                        .build())
+                .setProxy(getHost())
                 .setDefaultCredentialsProvider(credsProvider);
     }
 
